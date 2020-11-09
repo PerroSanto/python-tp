@@ -65,7 +65,6 @@ class Heladera(threading.Thread):
         self.name = name
         self.contenedorLatas = []
         self.contenedorBotellas = []
-        self.semaforo = threading.Semaphore(1)
         self.semaforoLata = threading.Semaphore(0)
         self.semaforoBotella = threading.Semaphore(0)
         
@@ -190,7 +189,6 @@ class Empleado(threading.Thread):
 
     def run(self):
         heladeraActual = self.recorridoHeladeras()
-        heladeraActual.semaforo.acquire()
         while True:
             while heladeraActual != None and not heladeraActual.estaLlena():
                 
