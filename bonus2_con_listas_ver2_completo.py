@@ -4,7 +4,7 @@ import time
 import pylint
 
 #Variables heladera
-cantHeladeras = 10
+cantHeladeras = 3
 maximoLatas = 15
 maximoBotellas = 10
 listaDeHeladeras = []
@@ -13,6 +13,13 @@ listaDeHeladeras = []
 cantProveedores = 15
 semaforoProveedor = threading.Semaphore(1)
 
+#variables de beodes
+monitorBeode = threading.Condition()
+cantBeodes = 20
+
+#variables pinchadura y empleado
+monitorPinchadura = threading.Condition()
+heladeraConLataPinchada = None
 
 #tiempo de espera
 def tiempoEspera(maximo):
@@ -58,6 +65,8 @@ class Heladera(threading.Thread):
         self.name = name
         self.contenedorLatas = []
         self.contenedorBotellas = []
+        self.semaforoLata = threading.Semaphore(0)
+        self.semaforoBotella = threading.Semaphore(0)
         self.botonFrio = 0
         self.enchufada = 0
 
@@ -80,28 +89,47 @@ class Heladera(threading.Thread):
     def hayEspacioContenedorBotellas(self):
         return(len(self.contenedorBotellas) < maximoBotellas)
 
-    def siPuede_MeterLata(self,unProveedor):
-        if (self.hayEspacioContenedorLatas() and unProveedor.tengoLatas()):
-            self.contenedorLatas.append(1)
-            unProveedor.siPuede_SacarLata()
-
-    def siPuede_MeterBotella(self,unProveedor):
-        if (self.hayEspacioContenedorBotellas() and unProveedor.tengoBotellas()):
-            self.contenedorBotellas.append(1)
-            unProveedor.siPuede_SacarBotella()
-
     def estaLlena(self):
         return(not(self.hayEspacioContenedorLatas()) and not(self.hayEspacioContenedorBotellas()))
-
-    def tieneLugar(self):
-        return(self.hayEspacioContenedorLatas() or self.hayEspacioContenedorBotellas())
     
     def faltanLatas(self):
         return(len(self.contenedorLatas) < maximoLatas)
 
     def faltanBotellas(self):
         return(len(self.contenedorBotellas) < maximoBotellas)
+
+    def hayLatas(self):
+        return len(self.contenedorLatas) > 0
     
+    def hayBotellas(self):
+        return len(self.contenedorBotellas) > 0
+    
+    def sacarLata(self,unBeode):
+        if not self.hayLatas():
+            self.semaforoLata.acquire()
+        self.contenedorLatas.pop(0)
+        unBeode.bebidaConsumida()
+
+    def sacarBotella(self,unBeode):
+        if not self.hayBotellas():
+            self.semaforoBotella.acquire()
+        self.contenedorBotellas.pop(0)
+        unBeode.bebidaConsumida()
+
+    def tieneLugar(self):
+        return(self.hayEspacioContenedorLatas() or self.hayEspacioContenedorBotellas())
+
+    def siPuede_MeterLata(self,unProveedor):
+        if (self.hayEspacioContenedorLatas() and unProveedor.tengoLatas()):
+            self.contenedorLatas.append(1)
+            unProveedor.siPuede_SacarLata()
+            self.semaforoLata.release()
+
+    def siPuede_MeterBotella(self,unProveedor):
+        if (self.hayEspacioContenedorBotellas() and unProveedor.tengoBotellas()):
+            self.contenedorBotellas.append(1)
+            unProveedor.siPuede_SacarBotella()
+            self.semaforoBotella.release()
 
 
 class Proveedor(threading.Thread):
@@ -198,7 +226,6 @@ class Proveedor(threading.Thread):
         print(self.name,": Presionando boton frio", heladeraActual.name)
         self.impresionSeparador()
 
-
     def run(self):
         self.cargarCajones()
         semaforoProveedor.acquire() #el proveedor toma el semaforo de proveedores
@@ -235,6 +262,7 @@ class Proveedor(threading.Thread):
                     heladeraActual.presionarBotonFrio()
                     self.impresionBotonFrio(heladeraActual)
                 heladeraActual = self.recorridoHeladeras()
+
                     
         else:
             print(self.name,": no tengo mas mercaderia o todas las heladeras estan llenas, me voy")
@@ -244,9 +272,131 @@ class Proveedor(threading.Thread):
             exit()
         
 
+class Beode(threading.Thread):
+    def __init__(self,preferencia,consumoMaximo,name):
+        super().__init__()
+        self.preferencia = preferencia
+        self.consumoMaximo = consumoMaximo
+        self.name = name
+        self.cantidadConsumida = 0
+
+    def preferenciaDeConsumoBeode(self,preferencia):
+        unaHeladera = self.elijeHeladeraAlAzar()
+        if(self.preferencia == 0):
+            self.consumeLatas(unaHeladera)
+        elif(self.preferencia == 1):
+            self.consumeBotellas(unaHeladera)
+        elif(self.preferencia == 2):
+            self.unaUOtra(unaHeladera)
+
+    def unaUOtra(self,unaHeladera):
+        seleccion = random.randint(0,1)
+        if seleccion == 0:
+            self.consumeLatas(unaHeladera)
+        else:
+            self.consumeBotellas(unaHeladera)
+
+    def elijeHeladeraAlAzar(self):
+        unaHeladera = listaDeHeladeras[random.randint(0,len(listaDeHeladeras)-1)]
+        return unaHeladera
+
+    def consumeLatas(self,unaHeladera):
+            unaHeladera.semaforoLata.acquire()
+            unaHeladera.sacarLata(self)
+            self.impresionBeode(unaHeladera,'lata')
 
 
-                    
+    def bebidaConsumida(self):
+        self.cantidadConsumida += 1
+
+    def consumeBotellas(self,unaHeladera):
+            unaHeladera.semaforoBotella.acquire()
+            unaHeladera.sacarBotella(self)
+            self.impresionBeode(unaHeladera,'Botella')
+
+    def beodeDesmayado(self):
+        return (self.consumoMaximo == self.cantidadConsumida)
+
+    def impresionBeode(self,unaHeladera,producto):
+        print(self.name,": Voy a consumir de",unaHeladera.name, "una", producto)
+        self.separador()
+
+    def impresionDesmayo(self):
+        print(self.name,"Me desmayo...")
+        self.separador()
+
+    def separador(self):
+        print("--------------------------------------------------------------------------------------------------")
+
+    def run(self):
+        while not self.beodeDesmayado():
+                self.preferenciaDeConsumoBeode(self.preferencia)
+                tiempoEspera(30)
+        else:
+            self.impresionDesmayo()
+
+
+
+
+class  PinchaduraDeLata(threading.Thread):
+    def __init__(self,monitor,name):
+        super().__init__()
+        self.monitor = monitor
+        self.name = name
+
+
+    def elijeHeladeraAlAzar(self):
+        unaHeladera = listaDeHeladeras[random.randint(0,len(listaDeHeladeras)-1)]
+        return unaHeladera
+
+    def pincharLata(self):
+        global heladeraConLataPinchada
+        unaHeladera = self.elijeHeladeraAlAzar()
+        if unaHeladera.hayLatas():
+            with self.monitor:
+                self.monitor.notify()
+                self.impresionPinchadura(unaHeladera)
+                heladeraConLataPinchada = unaHeladera
+
+    def impresionPinchadura(self,unaHeladera):
+        print(self.name,": ***** se pincho una lata en",unaHeladera.name, "tiene", len(unaHeladera.contenedorLatas), "latitas *****")
+        self.separador()
+    
+    def separador(self):
+        print("--------------------------------------------------------------------------------------------------")
+
+    def run(self):
+        while True:
+            tiempoEspera(60)
+            self.pincharLata()
+
+
+class Empleado(threading.Thread):
+    def __init__(self,monitor,name):
+        super().__init__()
+        self.monitor = monitor
+        self.name = name
+    
+    def sacarLataPinchada(self):
+        global heladeraConLataPinchada
+        unaHeladera = heladeraConLataPinchada
+        unaHeladera.contenedorLatas.pop(0)
+        self.impresionPinchadura(unaHeladera)
+
+    def impresionPinchadura(self,unaHeladera):
+        print(self.name,": ***** saco la lata pinchada de",unaHeladera.name, "tiene", len(unaHeladera.contenedorLatas), "latitas *****")
+        self.impresionSeparador()
+
+    def impresionSeparador(self):
+        print("--------------------------------------------------------------------------------------------------")
+
+    def run(self):
+        while True:
+            with self.monitor:
+                self.monitor.wait()
+                self.sacarLataPinchada()
+
+
 
 #run
 
@@ -259,3 +409,12 @@ for i in range(1,cantProveedores+1):
     botellas = random.randint(1,15)
     nombre = 'Proveedor ' + str(i)
     Proveedor(latas,botellas,nombre).start()
+
+for i in range(1,cantBeodes+1):
+    preferencia = random.randint(0,2)
+    consumoMaximo = random.randint(1,10)
+    nombre = 'Beode' + str(i)
+    Beode(preferencia,consumoMaximo,nombre).start()
+
+PinchaduraDeLata(monitorPinchadura,name="Pinchadura").start()
+Empleado(monitorPinchadura,name='Empleado').start()
