@@ -210,9 +210,9 @@ class Proveedor(threading.Thread):
                 tiempoEspera(2)  
 
             if heladeraActual.estaLlena():
+                self.impresionBotonFrio(heladeraActual)
                 self.impresionCargaHeladera(heladeraActual)
                 heladeraActual = self.recorridoHeladeras()
-                self.impresionBotonFrio(heladeraActual)
                 self.impresionEnchufar(heladeraActual)
                     
         else:
